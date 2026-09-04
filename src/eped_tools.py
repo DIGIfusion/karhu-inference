@@ -1,7 +1,12 @@
 import torch
 from scipy.constants import e, mu_0
+from scipy.interpolate import interp1d
 
-def get_teped(d_ped, ip, circumference, neped, tesep=100.0, zimp=4.0, zeff=1.2, z_main_ion=1.0, width_const=0.076, dengrad=1.0, denexpo=-1.0):
+from utils import get_circumference, shape_function, get_polar_from_rz
+
+def get_teped(d_ped, ip, circumference, neped, tesep=100.0, zimp=4.0, 
+                              zeff=1.2, z_main_ion=1.0, width_const=0.076, dengrad=1.0, 
+                              denexpo=-1.0):
         """
         Calculate teped according to the KBM constraint.
 
@@ -39,10 +44,12 @@ def get_teped(d_ped, ip, circumference, neped, tesep=100.0, zimp=4.0, zeff=1.2, 
         teped = pped / neped / ti_contribution / e / 1e19
         return teped    
         
-def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, neped=3.0, nesep=1.5, r_mag=2.94,
-                            shift=0.00, wconst=0.076, tria=0.25, a=0.88, tesep=100, delta=0.02,
-                            beta_N=1.3, zeff=1.0, stability_fraction=1.0, tiratio=1.0, dengrad=-1, 
-                            neprofin=torch.tensor(0), teprofin=torch.tensor(0)):
+def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, neped=3.0, 
+                                           nesep=1.5, r_mag=2.94, shift=0.00, wconst=0.076, tria=0.25, a=0.88, 
+                                           tesep=100, delta=0.02, beta_N=1.3, zeff=1.0, stability_fraction=1.0, 
+                                           tiratio=1.0, dengrad=-1, slope_c = 0.0, slope_exp1=1.0, slope_exp2=1.0,
+                                           neprofin=torch.tensor(0), 
+                                           teprofin=torch.tensor(0)):
         """
         This routine builds mtanh profiles and computes their linear MHD stability with KARHU.
         
@@ -67,61 +74,46 @@ def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, nepe
             stability_fraction: fraction with whic h to push the plasma pressure towards MHD instability
             tiratio (float): Ratio of Ti to Te
             dengrad (float): Normalized density gradient (grad_n/n) at edge.
+            slope_c (float): Multiplier for the core slope
+            slope_exp1 (float): Exponent 1 in the core slope
+            slope_exp2 (float): Exponent 2 in the core slope
             neprofin (torch.tensor): input density profile, if used
             teprofin (torch.tensort): input temperature profile, if used
         """
         
         
         
-        # Compute shape features:
+        # Compute shape input from triangularity:
         cm = get_circumference(torch.linspace(0,2*np.pi, 100), 1.67, tria, 0, 2.94, a)
         (r, z) = shape_function(theta_space, 1.67, tria, 0.0, 2.94, 0.88)
         rho, theta = get_polar_from_rz(r, z)
         interpolation_function = interp1d(theta, rho, kind="linear", fill_value='extrapolate')
         shape_int = interpolation_function(theta_space)
         shape_int = torch.tensor(shape_int, dtype=torch.float32)
-        pastne = torch.tensor([0])
-        pastte = torch.tensor([0])
-        tria = torch.tensor([tria])
-        beta_N = torch.tensor([beta_N])
-        zeff = torch.tensor([zeff])
-        insta = False
-        #while delta < 0.08:
-        teped = get_teped(delta, ip, cm, neped, width_const=wconst, dengrad=dengrad)
+        
+        # Compute pedestal temperature, based on the assumed transport model
+        teped = get_teped(delta, ip, cm, neped, width_const=wconst, dengrad=dengrad, zeff=1.0)        
+        # If pedestal temperature is below 100 eV. Return immediately as there is no pedestal.
         if teped < 100:
             return torch.tensor([0]), torch.zeros(len(neprofin)), torch.zeros(len(neprofin))
+
+        # Build pedestal profiles
         if torch.max(neprofin) == 0:      
             apedval = (neped - nesep)/TANH_NORMALIZER
             nesepfix = nesep #+ neasymp2 - neasymp1
             apedvalfix =  apedval #+ neasymp2 - neasymp
-            neprof= mtanh_hel(x0, aped=apedvalfix, asep=nesepfix, delta=delta, shift=shift, slope=0.0)     
+            neprof= mtanh_hel(x0, aped=apedvalfix, asep=nesepfix, delta=delta, shift=shift)     
         else:
+           # Use input density profile
            neprof = neprofin
-        tepedval = (teped - tesep)/TANH_NORMALIZER
-        
-        teprof = mtanh_hel(x0, aped=tepedval, asep=tesep, delta=delta, slope=0.0)
-        #if len(teprofin) > 2:
-        #    slope=0.0
-        #    slope_step=0.2
-        #    under = False
-        #    over = False
-        #    for i in range(20):
-        #        if teprofin[-1] - teprof[-1] > 0:
-        #            if under == False and over == True:
-        #                slope_step = slope_step/2
-        #            under = True
-        #            over = False
-        #            slope += slope_step
-        #        else:
-        #            if under == True and over == False:
-        #                slope_step = slope_step/2
-        #            under = False
-        #            over = True
-        #            slope  -= slope_step
-        #        teprof = mtanh_hel(x0, aped=tepedval, asep=tesep, delta=delta, slope=slope)
-        poke  = stability_fraction
-        teprof_ins = mtanh_hel(x0, aped=tepedval/poke, asep=tesep, delta=delta, slope=0.0)
+        teprof = mtanh_hel(x0, aped=teped, asep=tesep, delta=delta, a1=slope_c, exp1=slope_exp1, 
+                                               exp2=slope_exp2)
+        # This is used to compute the linear MHD stability. Notice the application of the stability fraction.
+        teprof_ins = mtanh_hel(x0, aped=tepedval/stability_fraction, asep=tesep, delta=delta, 
+                                                       a1=slope_c, exp1=slope_exp1, exp2=slope_exp2)
         tiprof_ins = teprof_ins*tiratio
+        
+        # Normalize the inputs to be used in the ML models
         input_ne = dataset.minmax(neprof, 
                                                    dataset.scaling_params["ne"][0],
                                                    dataset.scaling_params["ne"][1],
@@ -176,6 +168,7 @@ def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, nepe
                                                    dataset.scaling_params["zeff"][1],
                                                    )  
 
+        # Correct the tensor dimensions and make sure that dtype is float32.
         ine = torch.tensor(input_ne.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
         ite = torch.tensor(input_Te.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
         iti = torch.tensor(input_Ti.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
@@ -183,17 +176,21 @@ def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, nepe
         ibm = torch.tensor(input_b_mag.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
         irm = torch.tensor(input_r_mag.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
         iip = torch.tensor(input_ip.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
-        ibn = torch.tensor(input_beta_n.unsqueeze(0), dtype=torch.float32)
-        izn = torch.tensor(input_zeff.unsqueeze(0), dtype=torch.float32)
-            
+        ibn = torch.tensor(input_beta_n.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
+        izn = torch.tensor(input_zeff.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
+        
+        # ML models    
         y_pred = eq_model(ine, ite, iti, ish, 
                                            ibm, irm, iip, ibn, izn)
         gammap = karhu_model(y_pred[:,0].reshape((-1, 1, 64)), y_pred[:,1].reshape((-1, 1, 64)), y_pred[:,2].reshape((-1, 1, 64)),
                                                       ish, ibm, irm, ibn)
+         
+        # Denormalize the predictions
         gammap = dataset.descale_minmax(gammap, 
                                                    dataset.scaling_params["growthrate"][0],
                                                    dataset.scaling_params["growthrate"][1],
                                                    )
+        # Peak gamma ready to be returned
         gams = gammap.detach().numpy()
 
 
