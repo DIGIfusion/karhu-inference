@@ -1,0 +1,48 @@
+[project]
+name = "karhu-inference"
+version = "0.1.0"
+requires-python = ">=3.8"
+dependencies = [
+    "f90nml==1.4.4",
+    "h5py",
+    "json5",
+    "matplotlib",
+    "numpy",
+    "SciencePlots==2.1.1",
+    "scikit-image",
+    "scikit-learn",
+    "scipy",
+    "torch",
+    "urllib3",
+]
+authors = [ {name="Aaro Järvinen", email="aaro.jarvinen@vtt.fi"}]
+
+[dependency-groups]
+dev = [
+  "pytest", 
+  "freeqdsk"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pylint",
+]
+
+[build-system]
+requires = [
+  "setuptools>=64,<70",
+  "wheel"
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# We want setuptools to treat `src` as the root for packages
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+# This replicates `find_packages(where="src")`
+where = ["src"]
+
+
+
