@@ -1,8 +1,9 @@
 import torch
+import numpy as np
 from scipy.constants import e, mu_0
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, CubicSpline
 
-from utils import get_circumference, shape_function, get_polar_from_rz
+from utils import get_circumference, shape_function, get_polar_from_rz, mtanh_hel
 
 def get_teped(d_ped, ip, circumference, neped, tesep=100.0, zimp=4.0, 
                               zeff=1.2, z_main_ion=1.0, width_const=0.076, dengrad=1.0, 
@@ -45,11 +46,12 @@ def get_teped(d_ped, ip, circumference, neped, tesep=100.0, zimp=4.0,
         return teped    
         
 def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, neped=3.0, 
-                                           nesep=1.5, r_mag=2.94, shift=0.00, wconst=0.076, tria=0.25, a=0.88, 
+                                           nesep=1.5, r_mag=2.94, shift=0.015, wconst=0.076, tria=0.25, a=0.88, 
                                            tesep=100, delta=0.02, beta_N=1.3, zeff=1.0, stability_fraction=1.0, 
-                                           tiratio=1.0, dengrad=-1, slope_c = 0.0, slope_exp1=1.0, slope_exp2=1.0,
+                                           tiratio=1.0, dengrad=1.0, slope_c = 0.0, slope_exp1=1.0, slope_exp2=1.0,
                                            neprofin=torch.tensor(0), 
-                                           teprofin=torch.tensor(0)):
+                                           teprofin=torch.tensor(0),
+                                           theta_space=torch.linspace(1e-3, 2*np.pi, 128)):
         """
         This routine builds mtanh profiles and computes their linear MHD stability with KARHU.
         
@@ -79,6 +81,7 @@ def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, nepe
             slope_exp2 (float): Exponent 2 in the core slope
             neprofin (torch.tensor): input density profile, if used
             teprofin (torch.tensort): input temperature profile, if used
+            thete_space (array): theta_grid that is used in the shape calculations
         """
         
         
@@ -93,13 +96,14 @@ def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, nepe
         
         # Compute pedestal temperature, based on the assumed transport model
         teped = get_teped(delta, ip, cm, neped, width_const=wconst, dengrad=dengrad, zeff=1.0)        
+
         # If pedestal temperature is below 100 eV. Return immediately as there is no pedestal.
         if teped < 100:
             return torch.tensor([0]), torch.zeros(len(neprofin)), torch.zeros(len(neprofin))
 
         # Build pedestal profiles
         if torch.max(neprofin) == 0:      
-            apedval = (neped - nesep)/TANH_NORMALIZER
+            apedval = neped 
             nesepfix = nesep #+ neasymp2 - neasymp1
             apedvalfix =  apedval #+ neasymp2 - neasymp
             neprof= mtanh_hel(x0, aped=apedvalfix, asep=nesepfix, delta=delta, shift=shift)     
@@ -109,7 +113,7 @@ def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, nepe
         teprof = mtanh_hel(x0, aped=teped, asep=tesep, delta=delta, a1=slope_c, exp1=slope_exp1, 
                                                exp2=slope_exp2)
         # This is used to compute the linear MHD stability. Notice the application of the stability fraction.
-        teprof_ins = mtanh_hel(x0, aped=tepedval/stability_fraction, asep=tesep, delta=delta, 
+        teprof_ins = mtanh_hel(x0, aped=teped/stability_fraction, asep=tesep, delta=delta, 
                                                        a1=slope_c, exp1=slope_exp1, exp2=slope_exp2)
         tiprof_ins = teprof_ins*tiratio
         
@@ -169,15 +173,15 @@ def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, nepe
                                                    )  
 
         # Correct the tensor dimensions and make sure that dtype is float32.
-        ine = torch.tensor(input_ne.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
-        ite = torch.tensor(input_Te.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
-        iti = torch.tensor(input_Ti.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
-        ish = torch.tensor(input_shape.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
-        ibm = torch.tensor(input_b_mag.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
-        irm = torch.tensor(input_r_mag.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
-        iip = torch.tensor(input_ip.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
-        ibn = torch.tensor(input_beta_n.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
-        izn = torch.tensor(input_zeff.unsqueeze(0).unsqueeze(0), dtype=torch.float32)
+        ine = torch.tensor(input_ne, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        ite = torch.tensor(input_Te, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        iti = torch.tensor(input_Ti, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        ish = torch.tensor(input_shape, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        ibm = torch.tensor(input_b_mag, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        irm = torch.tensor(input_r_mag, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        iip = torch.tensor(input_ip, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        ibn = torch.tensor(input_beta_n, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        izn = torch.tensor(input_zeff, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
         
         # ML models    
         y_pred = eq_model(ine, ite, iti, ish, 
@@ -195,3 +199,93 @@ def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, nepe
 
 
         return gams, neprof, teprof
+        
+def run_eped_analysis(casedict, eq_model, karhu_model, dataset, x0=torch.linspace(0.9, 1.0, 64), 
+                                              ip=2.0, b_mag=2.0, neped=3.0, 
+                                              nesep=1.5, r_mag=2.94, shift=0.015, wconst=0.076, tria=0.25, a=0.88, 
+                                              tesep=100, delta=0.02, beta_N=1.3, zeff=1.2, stability_fraction=1.0, 
+                                              tiratio=1.0, dengrad=1.0, slope_c = 0.0, slope_exp1=1.0, slope_exp2=1.0,
+                                              neprofin=torch.tensor(0), 
+                                              teprofin=torch.tensor(0),
+                                              theta_space=torch.linspace(1e-3, 2*np.pi, 128)):
+    """
+    This is a helper function to run eped-like analysis, assuming an experimental case represented in a dictionary.
+    The dictionary is expected to contain following keys:
+        - 'psi': psi-coordinate
+        - 'nes': electron density (1e19 m-3)
+        - 'tes': electron temperature (keV)
+        - 'beta_N': normalized pressure (%)
+        - 'tria': triangularity
+        - 'bt': toroidal field (T)
+        - 'ip': plasma current (A)
+    """
+    psis = torch.tensor(casedict['psi'], dtype=torch.float32)
+    nes = torch.tensor(casedict['nes'], dtype=torch.float32)
+    tes = torch.tensor(casedict['tes'], dtype=torch.float32)
+    beta_N = torch.tensor(casedict['beta_N'], dtype=torch.float32)
+    tria = torch.tensor(casedict['tria'], dtype=torch.float32)
+    bt = torch.tensor(casedict['bt'], dtype=torch.float32)
+    ip = torch.tensor(casedict['ip'], dtype=torch.float32)/1e6
+     
+    # Find T_e_sep = 100 eV to locate separatrix
+    idx = torch.where(torch.abs(tes - 0.1) < 0.05)
+    psif = CubicSpline(torch.flip(tes[idx], dims=[0]), torch.flip(psis[idx], dims=[0]))
+    psisep = psif(0.1)
+    shift = 1.0 - psisep
+    # To be used later
+    tesep = 100
+     
+    # Interpolate profiles
+    nef = CubicSpline(psis[600:] + shift, nes[600:])              
+    tef = CubicSpline(psis[600:] + shift, tes[600:])
+    # Map to x0-grid and turn Te to units of eV
+    netarget = torch.tensor(nef(x0), dtype=torch.float32)
+    tetarget = torch.tensor(tef(x0), dtype=torch.float32)*1e3 
+     
+    if dengrad > 1:
+        dnnfull = torch.diff(netarget)/torch.diff(x0)
+        dnnedge = dnnfull[-5:]/netarget[-5:]
+        dnn = torch.mean(dnnedge)
+    else:
+        dnn = 1.0
+     
+
+    gam = 0
+    delta = 0.005
+    while gam < 0.03:
+        delta += 0.002
+        # Pedestal density - location at 1.0 - pedestal width
+        neped = netarget[0]
+        gam, neprof1, teprof1 = run_eped_profile(x0, eq_model, karhu_model, dataset, neped=neped, b_mag=bt,
+                                                                                         ip=ip, tria=tria, beta_N=beta_N, 
+                                                                                         shift=0.00, wconst=wconst, delta=delta,
+                                                                                         stability_fraction=stability_fraction, 
+                                                                                         dengrad=dnn,
+                                                                                         neprofin=torch.tensor(netarget, dtype=torch.float32),
+                                                                                         teprofin = torch.tensor(tetarget, dtype=torch.float32),
+                                                                                         )
+    outputdict = {'ne_target':netarget, 'te_target':tetarget, 'ne_pred':neprof1, 'te_pred': teprof1, 'gamma':gam}
+    return outputdict
+     
+     
+     
+     
+     
+     
+     
+     
+     
+     
+     
+     
+     
+     
+     
+     
+     
+     
+     
+     
+     
+     
+         
