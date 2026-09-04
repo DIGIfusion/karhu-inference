@@ -5,6 +5,9 @@ from scipy.interpolate import interp1d, CubicSpline
 
 from utils import get_circumference, shape_function, get_polar_from_rz, mtanh_hel
 
+TANH_NORMALIZER = (np.tanh(1) - np.tanh(-1))*1.155
+TANH_NORMALIZER_TI = np.tanh(1) - np.tanh(-100)
+
 def get_teped(d_ped, ip, circumference, neped, tesep=100.0, zimp=4.0, 
                               zeff=1.2, z_main_ion=1.0, width_const=0.076, dengrad=1.0, 
                               denexpo=-1.0):
@@ -34,13 +37,12 @@ def get_teped(d_ped, ip, circumference, neped, tesep=100.0, zimp=4.0,
         bp2 = (ip * 1e6 * mu_0 / circumference) ** 2
         betapolped = (d_ped / (width_const*dengrad**denexpo)) ** (1.0 / beta_exponent)
         pped = betapolped / (2 * mu_0) * bp2 
-
+       
         # Caluclate the pedestal temperature based on the KBM constraint
-        #TODO: Add the possibility for Ti not equal Te
-        #ti_contribution = (
-        #    1 + tiped_multip * pedestal_dilution *
-        #    (1 + (1 - TANH_NORMALIZER / TANH_NORMALIZER_TI) * (tisep_multip - 1.0) * tesep))
-        ti_contribution = 1.0
+        ti_contribution = (
+            1 + tiped_multip * pedestal_dilution *
+            (1 + (1 - TANH_NORMALIZER / TANH_NORMALIZER_TI) * (tisep_multip - 1.0) * tesep))
+     
         
         teped = pped / neped / ti_contribution / e / 1e19
         return teped    
@@ -103,17 +105,18 @@ def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, nepe
 
         # Build pedestal profiles
         if torch.max(neprofin) == 0:      
-            apedval = neped 
+            apedval = (neped - nesep)/TANH_NORMALIZER
             nesepfix = nesep #+ neasymp2 - neasymp1
             apedvalfix =  apedval #+ neasymp2 - neasymp
             neprof= mtanh_hel(x0, aped=apedvalfix, asep=nesepfix, delta=delta, shift=shift)     
         else:
            # Use input density profile
            neprof = neprofin
-        teprof = mtanh_hel(x0, aped=teped, asep=tesep, delta=delta, a1=slope_c, exp1=slope_exp1, 
+        tepedval = (teped - tesep)/TANH_NORMALIZER
+        teprof = mtanh_hel(x0, aped=tepedval, asep=tesep, delta=delta, a1=slope_c, exp1=slope_exp1, 
                                                exp2=slope_exp2)
         # This is used to compute the linear MHD stability. Notice the application of the stability fraction.
-        teprof_ins = mtanh_hel(x0, aped=teped/stability_fraction, asep=tesep, delta=delta, 
+        teprof_ins = mtanh_hel(x0, aped=tepedval/stability_fraction, asep=tesep, delta=delta, 
                                                        a1=slope_c, exp1=slope_exp1, exp2=slope_exp2)
         tiprof_ins = teprof_ins*tiratio
         
@@ -253,12 +256,12 @@ def run_eped_analysis(casedict, eq_model, karhu_model, dataset, x0=torch.linspac
     gam = 0
     delta = 0.005
     while gam < 0.03:
-        delta += 0.002
+        delta += 0.001
         # Pedestal density - location at 1.0 - pedestal width
         neped = netarget[0]
         gam, neprof1, teprof1 = run_eped_profile(x0, eq_model, karhu_model, dataset, neped=neped, b_mag=bt,
                                                                                          ip=ip, tria=tria, beta_N=beta_N, 
-                                                                                         shift=0.00, wconst=wconst, delta=delta,
+                                                                                         shift=0.00, wconst=wconst, delta=delta, zeff=2.0,
                                                                                          stability_fraction=stability_fraction, 
                                                                                          dengrad=dnn,
                                                                                          neprofin=torch.tensor(netarget, dtype=torch.float32),

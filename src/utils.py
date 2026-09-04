@@ -1,7 +1,8 @@
 import torch
 import numpy as np
 
-
+TANH_NORMALIZER = (np.tanh(1) - np.tanh(-1))*1.155
+TANH_NORMALIZER_TI = np.tanh(1) - np.tanh(-100)
 
 def mtanh_hel(x,  aped=10.0, asep=2.0, delta=0.04,shift=0.0, a1=0.0, exp1=0.0, exp2=0.0):
     """
@@ -20,15 +21,7 @@ def mtanh_hel(x,  aped=10.0, asep=2.0, delta=0.04,shift=0.0, a1=0.0, exp1=0.0, e
     pos = 1.0 - 0.5*delta + shift
     pedestal = 1.0 - delta + shift
     ase0 = asep
-    
-    # Tanh normalization to get the right pedestal top density
-    # When x = pedestal, y=aped
-    # First tanh
-    tanh1 = torch.tanh(torch.tensor(2*(1-pos)/delta, dtype=torch.float32))
-    # Second tanh
-    tanh2 = torch.tanh(torch.tensor(2*(pedestal - pos)/delta, dtype=torch.float32))
-    # a0 calculation
-    a0 = (aped - ase0)/(tanh1 - tanh2)
+    a0 = aped
     
     # Base mtanh-profile
     output = torch.zeros(len(x))
