@@ -174,17 +174,18 @@ def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, nepe
                                                    dataset.scaling_params["zeff"][0],
                                                    dataset.scaling_params["zeff"][1],
                                                    )  
+            input_zeff = torch.tensor(zeff, dtype=torch.float32)
 
         # Correct the tensor dimensions and make sure that dtype is float32.
-        ine = torch.tensor(input_ne, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-        ite = torch.tensor(input_Te, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-        iti = torch.tensor(input_Ti, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-        ish = torch.tensor(input_shape, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-        ibm = torch.tensor(input_b_mag, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-        irm = torch.tensor(input_r_mag, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-        iip = torch.tensor(input_ip, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-        ibn = torch.tensor(input_beta_n, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-        izn = torch.tensor(input_zeff, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        ine = input_ne.detach().clone().unsqueeze(0).unsqueeze(0).to(torch.float32)
+        ite = input_Te.detach().clone().unsqueeze(0).unsqueeze(0).to(torch.float32)
+        iti  = input_Ti.detach().clone().unsqueeze(0).unsqueeze(0).to(torch.float32)
+        ish = input_shape.detach().clone().unsqueeze(0).unsqueeze(0).to(torch.float32)
+        ibm = input_b_mag.detach().clone().unsqueeze(0).unsqueeze(0).to(torch.float32)
+        irm = input_r_mag.detach().clone().unsqueeze(0).unsqueeze(0).to(torch.float32)
+        iip = input_ip.detach().clone().unsqueeze(0).unsqueeze(0).to(torch.float32)
+        ibn = input_beta_n.detach().clone().unsqueeze(0).unsqueeze(0).to(torch.float32)
+        izn = input_zeff.detach().clone().unsqueeze(0).unsqueeze(0).to(torch.float32)
         
         # ML models    
         y_pred = eq_model(ine, ite, iti, ish, 
@@ -242,8 +243,8 @@ def run_eped_analysis(casedict, eq_model, karhu_model, dataset, x0=torch.linspac
     nef = CubicSpline(psis[600:] + shift, nes[600:])              
     tef = CubicSpline(psis[600:] + shift, tes[600:])
     # Map to x0-grid and turn Te to units of eV
-    netarget = torch.tensor(nef(x0), dtype=torch.float32)
-    tetarget = torch.tensor(tef(x0), dtype=torch.float32)*1e3 
+    netarget = torch.from_numpy(nef(x0)).detach().clone().to(torch.float32)
+    tetarget =torch.from_numpy(tef(x0)).detach().clone().to(torch.float32)*1e3 
      
     if dengrad > 1:
         dnnfull = torch.diff(netarget)/torch.diff(x0)
@@ -256,19 +257,21 @@ def run_eped_analysis(casedict, eq_model, karhu_model, dataset, x0=torch.linspac
     gam = 0
     delta = 0.005
     while gam < 0.03:
-        delta += 0.001
+        delta += 0.0005
         # Pedestal density - location at 1.0 - pedestal width
         neped = netarget[0]
         gam, neprof1, teprof1 = run_eped_profile(x0, eq_model, karhu_model, dataset, neped=neped, b_mag=bt,
                                                                                          ip=ip, tria=tria, beta_N=beta_N, 
-                                                                                         shift=0.00, wconst=wconst, delta=delta, zeff=2.0,
+                                                                                         shift=0.00, wconst=wconst, delta=delta, zeff=1.2,
                                                                                          stability_fraction=stability_fraction, 
                                                                                          dengrad=dnn,
-                                                                                         neprofin=torch.tensor(netarget, dtype=torch.float32),
-                                                                                         teprofin = torch.tensor(tetarget, dtype=torch.float32),
+                                                                                         neprofin=netarget.detach().clone().to(torch.float32),
+                                                                                         teprofin = tetarget.detach().clone().to(torch.float32),
+                                                                                         slope_c=slope_c, slope_exp1=slope_exp1, slope_exp2=slope_exp2,
                                                                                          )
     outputdict = {'ne_target':netarget, 'te_target':tetarget, 'ne_pred':neprof1, 'te_pred': teprof1, 'gamma':gam}
     return outputdict
+    
      
      
      

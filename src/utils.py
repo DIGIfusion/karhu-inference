@@ -18,14 +18,18 @@ def mtanh_hel(x,  aped=10.0, asep=2.0, delta=0.04,shift=0.0, a1=0.0, exp1=0.0, e
         exp1 (float): Core slope exponent 1
         exp2 (float: Core slope exponent 2 
     """
-    pos = 1.0 - 0.5*delta + shift
-    pedestal = 1.0 - delta + shift
+    pos = torch.tensor(1.0 - 0.5*delta + shift, dtype=torch.float32)
+    pos = pos.detach().clone()
+    pedestal = torch.tensor(1.0 - delta + shift, dtype=torch.float32)
+    pedestal = pedestal.detach().clone()
+    xin = x.detach().clone().to(torch.float32)
+    
     ase0 = asep
     a0 = aped
     
     # Base mtanh-profile
     output = torch.zeros(len(x))
-    output = ase0 + a0*(torch.tanh(torch.tensor(2*(1-pos)/delta, dtype=torch.float32)) - torch.tanh(torch.tensor(2*(x-pos)/delta, dtype=torch.float32))) 
+    output = ase0 + a0*(torch.tanh(2*(1-pos)/delta) - torch.tanh(2*(xin-pos)/delta) )
 
     # Core slope implemented via multiplier (a1), and two exponents.
     idx = np.where(x > pedestal)
