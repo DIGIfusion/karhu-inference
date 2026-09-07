@@ -97,11 +97,11 @@ def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, nepe
         shape_int = torch.tensor(shape_int, dtype=torch.float32)
         
         # Compute pedestal temperature, based on the assumed transport model
-        teped = get_teped(delta, ip, cm, neped, width_const=wconst, dengrad=dengrad, zeff=1.0)        
+        teped = get_teped(delta, ip, cm, neped, width_const=wconst, dengrad=dengrad, zeff=zeff)        
 
         # If pedestal temperature is below 100 eV. Return immediately as there is no pedestal.
         if teped < 100:
-            return torch.tensor([0]), torch.zeros(len(neprofin)), torch.zeros(len(neprofin))
+            return torch.tensor([0]), torch.zeros(len(neprofin)), torch.zeros(len(neprofin)), torch.zeros(len(neprofin))
 
         # Build pedestal profiles
         if torch.max(neprofin) == 0:      
@@ -116,7 +116,9 @@ def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, nepe
         teprof = mtanh_hel(x0, aped=tepedval, asep=tesep, delta=delta, a1=slope_c, exp1=slope_exp1, 
                                                exp2=slope_exp2)
         # This is used to compute the linear MHD stability. Notice the application of the stability fraction.
-        teprof_ins = mtanh_hel(x0, aped=tepedval/stability_fraction, asep=tesep, delta=delta, 
+        teped_ins = get_teped(delta/stability_fraction, ip, cm, neped, width_const=wconst, dengrad=dengrad, zeff=zeff)      
+        tepedval_ins = (teped_ins - tesep)/TANH_NORMALIZER
+        teprof_ins = mtanh_hel(x0, aped=tepedval_ins, asep=tesep, delta=delta/stability_fraction, 
                                                        a1=slope_c, exp1=slope_exp1, exp2=slope_exp2)
         tiprof_ins = teprof_ins*tiratio
         
@@ -202,7 +204,7 @@ def run_eped_profile(x0, eq_model, karhu_model, dataset, ip=2.0, b_mag=2.0, nepe
         gams = gammap.detach().numpy()
 
 
-        return gams, neprof, teprof
+        return gams, neprof, teprof, teprof_ins
         
 def run_eped_analysis(casedict, eq_model, karhu_model, dataset, x0=torch.linspace(0.9, 1.0, 64), 
                                               ip=2.0, b_mag=2.0, neped=3.0, 
@@ -260,16 +262,16 @@ def run_eped_analysis(casedict, eq_model, karhu_model, dataset, x0=torch.linspac
         delta += 0.0005
         # Pedestal density - location at 1.0 - pedestal width
         neped = netarget[0]
-        gam, neprof1, teprof1 = run_eped_profile(x0, eq_model, karhu_model, dataset, neped=neped, b_mag=bt,
+        gam, neprof1, teprof1, teins1 = run_eped_profile(x0, eq_model, karhu_model, dataset, neped=neped, b_mag=bt,
                                                                                          ip=ip, tria=tria, beta_N=beta_N, 
-                                                                                         shift=0.00, wconst=wconst, delta=delta, zeff=1.2,
+                                                                                         shift=shift, wconst=wconst, delta=delta, zeff=zeff,
                                                                                          stability_fraction=stability_fraction, 
                                                                                          dengrad=dnn,
                                                                                          neprofin=netarget.detach().clone().to(torch.float32),
                                                                                          teprofin = tetarget.detach().clone().to(torch.float32),
                                                                                          slope_c=slope_c, slope_exp1=slope_exp1, slope_exp2=slope_exp2,
                                                                                          )
-    outputdict = {'ne_target':netarget, 'te_target':tetarget, 'ne_pred':neprof1, 'te_pred': teprof1, 'gamma':gam}
+    outputdict = {'ne_target':netarget, 'te_target':tetarget, 'ne_pred':neprof1, 'te_pred': teprof1, 'te_ins':  teins1, 'gamma':gam}
     return outputdict
     
      

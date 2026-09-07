@@ -4,7 +4,7 @@ import numpy as np
 TANH_NORMALIZER = (np.tanh(1) - np.tanh(-1))*1.155
 TANH_NORMALIZER_TI = np.tanh(1) - np.tanh(-100)
 
-def mtanh_hel(x,  aped=10.0, asep=2.0, delta=0.04,shift=0.0, a1=0.0, exp1=0.0, exp2=0.0):
+def mtanh_hel(x,  aped=10.0, asep=2.0, delta=0.04,shift=torch.tensor(0.0), a1=0.0, exp1=0.0, exp2=0.0):
     """
     EPED mtanh profile definition Snyder PoP 16 056118 (2009)
     
@@ -18,10 +18,10 @@ def mtanh_hel(x,  aped=10.0, asep=2.0, delta=0.04,shift=0.0, a1=0.0, exp1=0.0, e
         exp1 (float): Core slope exponent 1
         exp2 (float: Core slope exponent 2 
     """
-    pos = torch.tensor(1.0 - 0.5*delta + shift, dtype=torch.float32)
-    pos = pos.detach().clone()
-    pedestal = torch.tensor(1.0 - delta + shift, dtype=torch.float32)
-    pedestal = pedestal.detach().clone()
+    pos = torch.tensor(1.0) - 0.5*delta + shift
+    pos = pos.detach().clone().to(torch.float32)
+    pedestal = torch.tensor(1.0) - delta + shift
+    pedestal = pedestal.detach().clone().to(torch.float32)
     xin = x.detach().clone().to(torch.float32)
     
     ase0 = asep
